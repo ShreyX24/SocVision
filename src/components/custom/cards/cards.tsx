@@ -1,32 +1,35 @@
-import { BtnBgShadow } from '../buttons/btn-bg-shadow';
+import { ReactNode, CSSProperties } from 'react';
+
+type CardStyle = 'square' | 'square_rounded' | 'circle';
+
+interface CardsProps {
+  card_style?: CardStyle;
+  children?: ReactNode;
+  className?: string;
+  isPinned?: boolean;
+  style?: CSSProperties;
+}
 
 export const Cards = ({
   card_style = 'square_rounded',
   children,
   className = '',
-  isPinned = false,
-}) => {
-  // Map card styles to the appropriate Tailwind classes
-  const borderRadiusStyles = {
+  style,
+}: CardsProps) => {
+  const borderRadiusStyles: Record<CardStyle, string> = {
     square: 'rounded-none',
     square_rounded: 'rounded-[4px]',
     circle: 'rounded-full',
   };
 
-  const borderWidthStyles = {
+  const borderWidthStyles: Record<CardStyle, string> = {
     square: 'border-4',
     square_rounded: 'border-[3px]',
     circle: 'border-2',
   };
 
-  const shadowBorderRadius = {
-    square: '0',
-    square_rounded: '4',
-    circle: '100',
-  };
-
   return (
-    <div className="relative w-full">
+    <div className="relative w-full" style={style}>
       <div
         className="absolute inset-0 translate-x-[3px] translate-y-[3px] bg-black rounded-[4px]"
       />

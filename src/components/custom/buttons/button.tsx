@@ -1,4 +1,21 @@
+import { ReactNode } from 'react';
 import { BtnBgShadow } from './btn-bg-shadow';
+
+type ButtonColor = 'green' | 'yellow' | 'blue' | 'purple' | 'red';
+type ButtonStyle = 'square' | 'square_rounded' | 'circle';
+type ButtonOrientation = 'ImageText' | 'TextImage';
+
+interface ButtonProps {
+  btn_color?: ButtonColor;
+  btn_style?: ButtonStyle;
+  btn_type?: 'button' | 'submit' | 'reset';
+  placeholder?: ReactNode;
+  className?: string;
+  icon_comp?: ReactNode;
+  orientation?: ButtonOrientation;
+  onClick?: () => void;
+  disabled?: boolean;
+}
 
 export const Button = ({
   btn_color = 'purple',
@@ -10,9 +27,8 @@ export const Button = ({
   orientation = 'ImageText',
   onClick,
   disabled = false,
-}) => {
-  // Map button styles to the appropriate Tailwind classes
-  const bgColors = {
+}: ButtonProps) => {
+  const bgColors: Record<ButtonColor, string> = {
     green: 'bg-[#55d355] hover:bg-[#4fc04f]',
     yellow: 'bg-[#ffd500] hover:bg-[#fcdb38]',
     blue: 'bg-[#2563eb] hover:bg-[#1549b9]',
@@ -20,20 +36,18 @@ export const Button = ({
     red: 'bg-[#d00000] hover:bg-[#b40202]',
   };
 
-  const borderRadiusStyles = {
+  const borderRadiusStyles: Record<ButtonStyle, string> = {
     square: 'rounded-none',
     square_rounded: 'rounded-[4px]',
     circle: 'rounded-full',
   };
 
-  // Determine text color based on button style
   const textColor =
     btn_color === 'blue' || btn_color === 'purple' || btn_color === 'red'
       ? 'text-yellow-300'
       : 'text-foreground';
 
-  // Map button style to appropriate border radius for BgShadow
-  const BtnBgShadowRadius = {
+  const BtnBgShadowRadius: Record<ButtonStyle, '0' | '4' | '100'> = {
     square: '0',
     square_rounded: '4',
     circle: '100',

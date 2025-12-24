@@ -1,13 +1,35 @@
-import React, { useState, useEffect, useMemo, memo } from 'react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, ScatterChart, Scatter } from 'recharts';
-import { Upload, X, TrendingUp, Cpu, Activity, Zap, ChevronRight, Folder, BarChart3, FileText, Trash2, Archive, Edit2, Check } from 'lucide-react';
-import { Button } from './components/custom/buttons/button';
+import React, { useState, useEffect, useMemo, memo, ChangeEvent } from 'react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { Upload, X, TrendingUp, Cpu, Activity, Folder, BarChart3, FileText, Trash2, Archive, Edit2, Check, Zap, Thermometer, Power } from 'lucide-react';
 import { Cards } from './components/custom/cards/cards';
-import { BtnBgShadow } from './components/custom/buttons/btn-bg-shadow';
 import { Popup } from './components/custom/popup/popup';
 
-// Memoized Chart Components for Performance
-const ActivityChart = memo(({ data }) => (
+// Import types
+import {
+  CoreStateData,
+  ProfileMetadata,
+  ProfileInsights,
+  GameProfile,
+  SelectedGame,
+  SKU,
+  ColorPalette,
+  PopupState,
+  ComparisonItem,
+  ViewMode
+} from './types';
+
+// Import utilities
+import { colorPalettes, getHeatmapColorForRatio, getActivityColor as getActivityColorUtil } from './utils/colors';
+import { generateInsights } from './utils/calculations';
+
+// Import parsers
+import { parseCSVFile, detectCSVFormat } from './parsers';
+
+// Import charts
+import { ActivityChart, FrequencyChart, PackageStateChart, ConcurrencyChart, PowerChart, TemperatureChart, WakeupChart } from './components/charts';
+
+// Memoized Legacy Chart Components (kept for backward compatibility)
+const LegacyActivityChart = memo(({ data }: { data: CoreStateData[] }) => (
   <ResponsiveContainer width="100%" height={250}>
     <BarChart data={data}>
       <CartesianGrid strokeDasharray="3 3" stroke="#9ca3af" strokeWidth={1} />
@@ -23,7 +45,7 @@ const ActivityChart = memo(({ data }) => (
   </ResponsiveContainer>
 ));
 
-const FrequencyChart = memo(({ data }) => (
+const LegacyFrequencyChart = memo(({ data }: { data: CoreStateData[] }) => (
   <ResponsiveContainer width="100%" height={250}>
     <BarChart data={data}>
       <CartesianGrid strokeDasharray="3 3" stroke="#9ca3af" strokeWidth={1} />
@@ -40,100 +62,20 @@ const FrequencyChart = memo(({ data }) => (
 ));
 
 const SoCWatchAnalyzer = () => {
-  // Color Palettes
-  const colorPalettes = {
-    default: {
-      name: 'Teal Fresh',
-      headerBg: '#4fb39c',
-      headerText: '#111827',
-      sidebarBg: '#89ddd6',
-      buttonPrimary: '#2563eb',
-      buttonSecondary: '#8b3ecf',
-      buttonSuccess: '#55d355',
-      buttonDanger: '#d00000',
-      background: '#fffbeb',
-      cardBg: '#ffffff',
-      tableHeaderBg: '#4fb39c',
-      tableHeaderText: '#111827',
-      accentColor: '#ff6b9d'
-    },
-    vibrant: {
-      name: 'Coral Sunset',
-      headerBg: '#ff6b6b',
-      headerText: '#111827',
-      sidebarBg: '#ffb6b6',
-      buttonPrimary: '#4ecdc4',
-      buttonSecondary: '#ff6b9d',
-      buttonSuccess: '#51cf66',
-      buttonDanger: '#ff4757',
-      background: '#fff8f0',
-      cardBg: '#ffffff',
-      tableHeaderBg: '#ff6b6b',
-      tableHeaderText: '#111827',
-      accentColor: '#ffd93d'
-    },
-    pastel: {
-      name: 'Soft Pastels',
-      headerBg: '#b4d7d8',
-      headerText: '#111827',
-      sidebarBg: '#e0f2f1',
-      buttonPrimary: '#a6c1ee',
-      buttonSecondary: '#dda6e6',
-      buttonSuccess: '#c3e6c3',
-      buttonDanger: '#f5b5b5',
-      background: '#fefefe',
-      cardBg: '#ffffff',
-      tableHeaderBg: '#b4d7d8',
-      tableHeaderText: '#111827',
-      accentColor: '#ffd6a5'
-    },
-    ocean: {
-      name: 'Ocean Breeze',
-      headerBg: '#3b82f6',
-      headerText: '#ffffff',
-      sidebarBg: '#93c5fd',
-      buttonPrimary: '#06b6d4',
-      buttonSecondary: '#8b5cf6',
-      buttonSuccess: '#10b981',
-      buttonDanger: '#ef4444',
-      background: '#f0f9ff',
-      cardBg: '#ffffff',
-      tableHeaderBg: '#3b82f6',
-      tableHeaderText: '#ffffff',
-      accentColor: '#fbbf24'
-    },
-    sunset: {
-      name: 'Warm Sunset',
-      headerBg: '#f97316',
-      headerText: '#111827',
-      sidebarBg: '#fed7aa',
-      buttonPrimary: '#dc2626',
-      buttonSecondary: '#c026d3',
-      buttonSuccess: '#65a30d',
-      buttonDanger: '#b91c1c',
-      background: '#fffbeb',
-      cardBg: '#ffffff',
-      tableHeaderBg: '#f97316',
-      tableHeaderText: '#111827',
-      accentColor: '#fde047'
-    }
-  };
-
-  // State: SKUs contain directories, each directory contains multiple games
-  const [skus, setSkus] = useState([]); // [{name, games: [], isArchived: false}]
-  const [archivedSkus, setArchivedSkus] = useState([]); // [{name, games: [], isArchived: true}]
-  const [activeView, setActiveView] = useState('overall'); // 'overall', 'focused', or 'comparison'
-  const [selectedGame, setSelectedGame] = useState(null); // For focused view
+  // State
+  const [skus, setSkus] = useState<SKU[]>([]);
+  const [archivedSkus, setArchivedSkus] = useState<SKU[]>([]);
+  const [activeView, setActiveView] = useState<ViewMode>('overall');
+  const [selectedGame, setSelectedGame] = useState<SelectedGame | null>(null);
   const [comparisonMode, setComparisonMode] = useState(false);
-  const [selectedGamesForComparison, setSelectedGamesForComparison] = useState([]); // [{game, skuName}]
+  const [selectedGamesForComparison, setSelectedGamesForComparison] = useState<ComparisonItem[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
-  const [renamingSkuName, setRenamingSkuName] = useState(null);
+  const [renamingSkuName, setRenamingSkuName] = useState<string | null>(null);
   const [newSkuName, setNewSkuName] = useState('');
   const [screenWidth, setScreenWidth] = useState(typeof window !== 'undefined' ? window.innerWidth : 1920);
-  const [userComparisonLimit, setUserComparisonLimit] = useState(null); // null = use auto, otherwise user preference
-  const [currentPalette, setCurrentPalette] = useState(() => {
-    // Load saved palette from localStorage
+  const [userComparisonLimit, setUserComparisonLimit] = useState<number | null>(null);
+  const [currentPalette, setCurrentPalette] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       const savedPalette = localStorage.getItem('socWatchColorPalette');
       if (savedPalette && colorPalettes[savedPalette]) {
@@ -144,8 +86,6 @@ const SoCWatchAnalyzer = () => {
   });
 
   const year = new Date().getFullYear();
-
-  // Get current colors
   const colors = colorPalettes[currentPalette];
 
   // Save palette preference to localStorage
@@ -155,35 +95,28 @@ const SoCWatchAnalyzer = () => {
     }
   }, [currentPalette]);
 
-  // Calculate max comparisons based on screen width (absolute maximum that can fit)
+  // Calculate max comparisons based on screen width
   const screenMaxComparisons = useMemo(() => {
-    // More conservative calculation for better readability
-    // Metric column takes ~160px, each comparison needs 230px (was 200), add more padding
     const metricColumnWidth = 160;
     const comparisonColumnWidth = 230;
     const padding = 150;
-
     const availableWidth = screenWidth - metricColumnWidth - padding;
     const calculated = Math.floor(availableWidth / comparisonColumnWidth);
-
-    // Ensure minimum of 2 and maximum of 24 comparisons
     return Math.max(2, Math.min(24, calculated));
   }, [screenWidth]);
 
-  // Effective max comparisons (respects user preference if set)
   const maxComparisons = userComparisonLimit !== null
     ? Math.min(userComparisonLimit, screenMaxComparisons)
-    : Math.min(6, screenMaxComparisons); // Default to 6 or less if screen is small
+    : Math.min(6, screenMaxComparisons);
 
   // Popup state
-  const [popup, setPopup] = useState({ isOpen: false, title: '', message: '', type: 'info', onConfirm: null });
+  const [popup, setPopup] = useState<PopupState>({ isOpen: false, title: '', message: '', type: 'info', onConfirm: null });
 
-  // Handle window resize to update max comparisons
+  // Handle window resize
   useEffect(() => {
     const handleResize = () => {
       setScreenWidth(window.innerWidth);
     };
-
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
@@ -193,7 +126,6 @@ const SoCWatchAnalyzer = () => {
     if (selectedGamesForComparison.length > maxComparisons) {
       setSelectedGamesForComparison(selectedGamesForComparison.slice(0, maxComparisons));
       if (userComparisonLimit === null) {
-        // Only show popup if it's due to screen resize, not user adjustment
         setPopup({
           isOpen: true,
           title: 'Comparison Limit Adjusted',
@@ -203,14 +135,17 @@ const SoCWatchAnalyzer = () => {
         });
       }
     }
-  }, [maxComparisons]);
+  }, [maxComparisons, selectedGamesForComparison.length, userComparisonLimit]);
 
   // Reset user preference if screen gets too small
   useEffect(() => {
     if (userComparisonLimit !== null && userComparisonLimit > screenMaxComparisons) {
       setUserComparisonLimit(screenMaxComparisons);
     }
-  }, [screenMaxComparisons]);
+  }, [screenMaxComparisons, userComparisonLimit]);
+
+  // Track if data has been loaded from localStorage
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
 
   // Load data from localStorage on mount
   useEffect(() => {
@@ -227,17 +162,13 @@ const SoCWatchAnalyzer = () => {
     } catch (error) {
       console.error('Error loading data from localStorage:', error);
     } finally {
-      // Mark data as loaded (even if there was nothing to load)
       setIsDataLoaded(true);
     }
   }, []);
 
-  // Track if data has been loaded from localStorage
-  const [isDataLoaded, setIsDataLoaded] = useState(false);
-
-  // Save SKUs to localStorage whenever they change (but only after initial load)
+  // Save SKUs to localStorage whenever they change
   useEffect(() => {
-    if (!isDataLoaded) return; // Don't save until data is loaded
+    if (!isDataLoaded) return;
     try {
       localStorage.setItem('socwatch_skus', JSON.stringify(skus));
     } catch (error) {
@@ -245,9 +176,9 @@ const SoCWatchAnalyzer = () => {
     }
   }, [skus, isDataLoaded]);
 
-  // Save archived SKUs to localStorage whenever they change (but only after initial load)
+  // Save archived SKUs to localStorage whenever they change
   useEffect(() => {
-    if (!isDataLoaded) return; // Don't save until data is loaded
+    if (!isDataLoaded) return;
     try {
       localStorage.setItem('socwatch_archived_skus', JSON.stringify(archivedSkus));
     } catch (error) {
@@ -255,174 +186,19 @@ const SoCWatchAnalyzer = () => {
     }
   }, [archivedSkus, isDataLoaded]);
 
-  // Parse Intel SoC Watch CSV
-  const parseIntelSoCWatch = (fileContent, filename) => {
-    const lines = fileContent.split('\n');
-    const profile = {
-      name: filename.replace('.csv', '').replace(/PTATMonitor.*/, '').trim(),
-      metadata: {},
-      coreTypes: {},
-      cStateData: [],
-      avgFrequencies: []
-    };
-
-    // Extract metadata
-    for (let i = 0; i < Math.min(50, lines.length); i++) {
-      if (lines[i].includes('Collection duration')) {
-        const match = lines[i].match(/(\d+\.?\d*)/);
-        if (match) profile.metadata.duration = parseFloat(match[1]);
-      }
-      if (lines[i].includes('CPU Base Operating Frequency')) {
-        const match = lines[i].match(/(\d+)/);
-        if (match) profile.metadata.baseFreq = parseInt(match[1]);
-      }
-      if (lines[i].includes('Total # of cores:')) {
-        const match = lines[i].match(/(\d+)/);
-        if (match) profile.metadata.totalCores = parseInt(match[1]);
-      }
-    }
-
-    // Extract core types
-    for (let i = 0; i < lines.length; i++) {
-      const match = lines[i].match(/Package_0\/Core_(\d+) = (LNC|SKT)/);
-      if (match) {
-        const coreNum = parseInt(match[1]);
-        profile.coreTypes[coreNum] = match[2] === 'LNC' ? 'P-Core' : 'E-Core';
-      }
-    }
-
-    // Parse C-State data
-    let cStateStartIdx = -1;
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].includes('Core C-State Summary: Residency (Percentage and Time)')) {
-        cStateStartIdx = i + 1;
-        break;
-      }
-    }
-
-    if (cStateStartIdx > 0) {
-      let cStateLines = [];
-      for (let i = cStateStartIdx; i < lines.length; i++) {
-        if (lines[i].trim() === '' || lines[i].includes('Core C-State Summary: Total Samples')) break;
-        cStateLines.push(lines[i]);
-      }
-
-      if (cStateLines.length > 2) {
-        const dataRows = cStateLines.slice(2);
-        dataRows.forEach(row => {
-          const values = row.split(',');
-          const state = values[0]?.trim();
-          if (state && !state.includes('---')) {
-            for (let coreId = 0; coreId < profile.metadata.totalCores; coreId++) {
-              const residency = parseFloat(values[coreId + 1]) || 0;
-              let coreData = profile.cStateData.find(c => c.core === coreId);
-              if (!coreData) {
-                coreData = {
-                  core: coreId,
-                  type: profile.coreTypes[coreId] || 'Unknown',
-                  active: 0,
-                  cc6: 0,
-                  cc7: 0
-                };
-                profile.cStateData.push(coreData);
-              }
-              if (state.includes('CC0') || state.includes('CC1')) coreData.active = residency;
-              else if (state.includes('CC6')) coreData.cc6 = residency;
-              else if (state.includes('CC7')) coreData.cc7 = residency;
-            }
-          }
-        });
-      }
-    }
-
-    // Parse frequency data
-    let freqStartIdx = -1;
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].includes('CPU P-State Average Frequency (excluding CPU idle time)')) {
-        freqStartIdx = i + 1;
-        break;
-      }
-    }
-
-    if (freqStartIdx > 0) {
-      for (let i = freqStartIdx; i < lines.length; i++) {
-        if (lines[i].trim() === '' || lines[i].includes('CPU P-State/Frequency Summary')) break;
-        const match = lines[i].match(/Core_(\d+).*?,\s*(\d+)/);
-        if (match) {
-          const coreNum = parseInt(match[1]);
-          const freq = parseInt(match[2]);
-          profile.avgFrequencies.push({
-            core: coreNum,
-            freq: freq,
-            type: profile.coreTypes[coreNum] || 'Unknown'
-          });
-        }
-      }
-    }
-
-    // Merge frequency into cState
-    profile.cStateData.forEach(cData => {
-      const freqData = profile.avgFrequencies.find(f => f.core === cData.core);
-      if (freqData) cData.freq = freqData.freq;
-    });
-
-    return profile;
-  };
-
-  // Generate insights for a game profile
-  const generateInsights = (profile) => {
-    const pCores = profile.cStateData.filter(c => c.type === 'P-Core');
-    const eCores = profile.cStateData.filter(c => c.type === 'E-Core');
-
-    const avgPActivity = pCores.reduce((sum, c) => sum + c.active, 0) / pCores.length;
-    const avgEActivity = eCores.reduce((sum, c) => sum + c.active, 0) / eCores.length;
-    const avgPFreq = pCores.reduce((sum, c) => sum + (c.freq || 0), 0) / pCores.length;
-    const avgEFreq = eCores.reduce((sum, c) => sum + (c.freq || 0), 0) / eCores.length;
-
-    const pCoreActivity = pCores.reduce((s, c) => s + c.active, 0) / pCores.length;
-    const eCoreActivity = eCores.reduce((s, c) => s + c.active, 0) / eCores.length;
-
-    // C-State averages
-    const avgPCC6 = pCores.reduce((sum, c) => sum + (c.cc6 || 0), 0) / pCores.length;
-    const avgECC6 = eCores.reduce((sum, c) => sum + (c.cc6 || 0), 0) / eCores.length;
-    const avgPCC7 = pCores.reduce((sum, c) => sum + (c.cc7 || 0), 0) / pCores.length;
-    const avgECC7 = eCores.reduce((sum, c) => sum + (c.cc7 || 0), 0) / eCores.length;
-    const avgCC6 = (avgPCC6 + avgECC6) / 2;
-    const avgCC7 = (avgPCC7 + avgECC7) / 2;
-
-    // Overall threading ratio (for heatmap table)
-    const threadingRatio = pCoreActivity / (eCoreActivity || 1);
-
-    return {
-      pCoreActivity: pCoreActivity.toFixed(1),
-      eCoreActivity: eCoreActivity.toFixed(1),
-      pCoreAvgFreq: avgPFreq.toFixed(0),
-      eCoreAvgFreq: avgEFreq.toFixed(0),
-      pCoreCC6: avgPCC6.toFixed(1),
-      eCoreCC6: avgECC6.toFixed(1),
-      pCoreCC7: avgPCC7.toFixed(1),
-      eCoreCC7: avgECC7.toFixed(1),
-      avgCC6: avgCC6.toFixed(1),
-      avgCC7: avgCC7.toFixed(1),
-      threadingRatio: threadingRatio.toFixed(2),
-      threadingModel: avgPActivity > avgEActivity + 10 ? 'P-Core Dominant' :
-                      avgEActivity > avgPActivity + 10 ? 'E-Core Dominant' : 'Balanced',
-    };
-  };
-
-  // Handle directory upload
-  const handleDirectoryUpload = async (event, skuName) => {
-    const files = Array.from(event.target.files);
+  // Handle directory upload - now using the new parser
+  const handleDirectoryUpload = async (event: ChangeEvent<HTMLInputElement>, skuName: string) => {
+    const files = Array.from(event.target.files || []);
     if (files.length === 0) return;
 
     setIsProcessing(true);
     try {
-      const games = [];
+      const games: GameProfile[] = [];
       for (const file of files) {
         if (file.name.endsWith('.csv')) {
           const content = await file.text();
-          const profile = parseIntelSoCWatch(content, file.name);
-          profile.insights = generateInsights(profile);
+          // Use the new auto-detecting parser
+          const profile = parseCSVFile(content, file.name);
           games.push(profile);
         }
       }
@@ -448,18 +224,16 @@ const SoCWatchAnalyzer = () => {
     }
   };
 
-  // Get heatmap color based on threading ratio
-  const getHeatmapColorForRatio = (ratio) => {
-    // ratio < 0.95 = green (good E-core usage)
-    // ratio 0.95-1.05 = yellow (balanced)
-    // ratio > 1.05 = red (P-core dominant)
-    if (ratio < 0.95) return '#10b981'; // green
-    if (ratio > 1.05) return '#ef4444'; // red
-    return '#fbbf24'; // yellow
+  // Color gradient for heatmap
+  const getActivityColor = (percentage: number): string => {
+    const r = Math.round(147 - percentage * 0.81);
+    const g = Math.round(197 - percentage * 1.16);
+    const b = Math.round(253 - percentage * 0.51);
+    return `rgb(${r}, ${g}, ${b})`;
   };
 
   // Toggle game for comparison
-  const toggleGameComparison = (game, skuName) => {
+  const toggleGameComparison = (game: GameProfile, skuName: string) => {
     const gameId = `${skuName}-${game.name}`;
     const existingIndex = selectedGamesForComparison.findIndex(
       g => `${g.skuName}-${g.game.name}` === gameId
@@ -483,7 +257,7 @@ const SoCWatchAnalyzer = () => {
   };
 
   // Check if a game is selected for comparison
-  const isGameSelectedForComparison = (game, skuName) => {
+  const isGameSelectedForComparison = (game: GameProfile, skuName: string): boolean => {
     const gameId = `${skuName}-${game.name}`;
     return selectedGamesForComparison.some(
       g => `${g.skuName}-${g.game.name}` === gameId
@@ -491,18 +265,17 @@ const SoCWatchAnalyzer = () => {
   };
 
   // Remove a specific game from a SKU
-  const removeGame = (skuName, gameIndex) => {
+  const removeGame = (skuName: string, gameIndex: number) => {
     const updatedSkus = skus.map(sku => {
       if (sku.name === skuName) {
         const updatedGames = sku.games.filter((_, idx) => idx !== gameIndex);
         return { ...sku, games: updatedGames };
       }
       return sku;
-    }).filter(sku => sku.games.length > 0); // Remove SKU if no games left
+    }).filter(sku => sku.games.length > 0);
 
     setSkus(updatedSkus);
 
-    // Clear selected game if it was removed
     if (selectedGame && selectedGame.skuName === skuName) {
       const game = skus.find(s => s.name === skuName)?.games[gameIndex];
       if (game && selectedGame.name === game.name) {
@@ -513,7 +286,7 @@ const SoCWatchAnalyzer = () => {
   };
 
   // Remove entire SKU directory
-  const removeSku = (skuName) => {
+  const removeSku = (skuName: string) => {
     setPopup({
       isOpen: true,
       title: 'Remove Directory',
@@ -523,7 +296,6 @@ const SoCWatchAnalyzer = () => {
       onConfirm: () => {
         setSkus(skus.filter(sku => sku.name !== skuName));
 
-        // Clear selected game if it was in this SKU
         if (selectedGame && selectedGame.skuName === skuName) {
           setSelectedGame(null);
           setActiveView('overall');
@@ -533,14 +305,13 @@ const SoCWatchAnalyzer = () => {
   };
 
   // Archive a SKU
-  const archiveSku = (skuName) => {
+  const archiveSku = (skuName: string) => {
     const skuToArchive = skus.find(sku => sku.name === skuName);
     if (!skuToArchive) return;
 
     setSkus(skus.filter(sku => sku.name !== skuName));
     setArchivedSkus([...archivedSkus, { ...skuToArchive, isArchived: true }]);
 
-    // Clear selected game if it was in this SKU
     if (selectedGame && selectedGame.skuName === skuName) {
       setSelectedGame(null);
       setActiveView('overall');
@@ -548,7 +319,7 @@ const SoCWatchAnalyzer = () => {
   };
 
   // Unarchive a SKU
-  const unarchiveSku = (skuName) => {
+  const unarchiveSku = (skuName: string) => {
     const skuToUnarchive = archivedSkus.find(sku => sku.name === skuName);
     if (!skuToUnarchive) return;
 
@@ -557,7 +328,7 @@ const SoCWatchAnalyzer = () => {
   };
 
   // Start renaming a SKU
-  const startRenamingSku = (skuName) => {
+  const startRenamingSku = (skuName: string) => {
     setRenamingSkuName(skuName);
     setNewSkuName(skuName);
   };
@@ -569,10 +340,9 @@ const SoCWatchAnalyzer = () => {
   };
 
   // Confirm rename SKU
-  const confirmRenameSku = (oldSkuName) => {
+  const confirmRenameSku = (oldSkuName: string) => {
     const trimmedName = newSkuName.trim();
 
-    // Validate new name
     if (!trimmedName) {
       setPopup({
         isOpen: true,
@@ -584,7 +354,6 @@ const SoCWatchAnalyzer = () => {
       return;
     }
 
-    // Check if name already exists
     if (trimmedName !== oldSkuName && skus.some(sku => sku.name === trimmedName)) {
       setPopup({
         isOpen: true,
@@ -596,22 +365,18 @@ const SoCWatchAnalyzer = () => {
       return;
     }
 
-    // Update SKU name
     setSkus(skus.map(sku => sku.name === oldSkuName ? { ...sku, name: trimmedName } : sku));
 
-    // Update selected game if it's from this SKU
     if (selectedGame && selectedGame.skuName === oldSkuName) {
       setSelectedGame({ ...selectedGame, skuName: trimmedName });
     }
 
-    // Update comparison games if any are from this SKU
     setSelectedGamesForComparison(
       selectedGamesForComparison.map(item =>
         item.skuName === oldSkuName ? { ...item, skuName: trimmedName } : item
       )
     );
 
-    // Clear renaming state
     setRenamingSkuName(null);
     setNewSkuName('');
   };
@@ -659,7 +424,6 @@ const SoCWatchAnalyzer = () => {
                 if (hasMultipleFiles) {
                   setComparisonMode(!comparisonMode);
                   if (comparisonMode) {
-                    // Exit comparison mode
                     setSelectedGamesForComparison([]);
                     setActiveView('overall');
                   }
@@ -747,7 +511,6 @@ const SoCWatchAnalyzer = () => {
                 <div key={sku.name} className="space-y-1">
                   <div className="flex items-center justify-between gap-2">
                     {renamingSkuName === sku.name ? (
-                      // Rename mode
                       <div className="flex items-center gap-1 flex-1">
                         <Folder className="w-3 h-3 text-gray-900" />
                         <input
@@ -763,7 +526,6 @@ const SoCWatchAnalyzer = () => {
                         />
                       </div>
                     ) : (
-                      // Display mode
                       <h3 className="text-sm font-black text-gray-900 uppercase flex items-center gap-1 flex-1">
                         <Folder className="w-3 h-3" />
                         {sku.name}
@@ -831,6 +593,7 @@ const SoCWatchAnalyzer = () => {
                   <div className="space-y-1 pl-1">
                     {sku.games.map((game, idx) => {
                       const isSelected = isGameSelectedForComparison(game, sku.name);
+                      const isComprehensive = game.formatVersion === 'comprehensive';
                       return (
                         <div
                           key={`${sku.name}-${game.name}-${idx}`}
@@ -870,7 +633,12 @@ const SoCWatchAnalyzer = () => {
                               comparisonMode && isSelected ? 'text-white' : ''
                             }`}
                           >
-                            <div className="truncate">{game.name}</div>
+                            <div className="truncate flex items-center gap-1">
+                              {game.name}
+                              {isComprehensive && (
+                                <span className="text-[9px] px-1 py-0.5 bg-green-500 text-white rounded-[2px] font-black">FULL</span>
+                              )}
+                            </div>
                           </button>
                           {!comparisonMode && (
                             <button
@@ -909,29 +677,13 @@ const SoCWatchAnalyzer = () => {
 
   // Comparison View
   const ComparisonView = () => {
-    const [expandedComparisonRows, setExpandedComparisonRows] = useState({});
-    const [showChartsFor, setShowChartsFor] = useState({});
+    const [expandedComparisonRows, setExpandedComparisonRows] = useState<Record<number, boolean>>({});
 
-    const toggleComparisonRowExpansion = (gameIndex) => {
+    const toggleComparisonRowExpansion = (gameIndex: number) => {
       setExpandedComparisonRows(prev => ({
         ...prev,
         [gameIndex]: !prev[gameIndex]
       }));
-    };
-
-    const toggleChartsVisibility = (gameIndex) => {
-      setShowChartsFor(prev => ({
-        ...prev,
-        [gameIndex]: !prev[gameIndex]
-      }));
-    };
-
-    // Color gradient for heatmap (same as in FocusedView)
-    const getActivityColor = (percentage) => {
-      const r = Math.round(147 - percentage * 0.81); // 147 to 30
-      const g = Math.round(197 - percentage * 1.16); // 197 to 81
-      const b = Math.round(253 - percentage * 0.51); // 253 to 202
-      return `rgb(${r}, ${g}, ${b})`;
     };
 
     if (selectedGamesForComparison.length === 0) {
@@ -940,431 +692,92 @@ const SoCWatchAnalyzer = () => {
           <Cards className="p-10 text-center">
             <TrendingUp className="w-20 h-20 text-gray-900 mx-auto mb-4" />
             <h3 className="text-3xl font-black mb-2 text-gray-900">No Games Selected</h3>
-            <p className="text-lg font-bold text-gray-700">Select 2-4 games from the sidebar to compare their threading profiles</p>
+            <p className="text-lg font-bold text-gray-700">Select 2-{maxComparisons} games from the sidebar to compare their threading profiles</p>
           </Cards>
         </div>
       );
     }
 
+    const metrics = [
+      { key: 'pCoreActivity', label: 'P-Core Activity (%)', format: (v: string) => v },
+      { key: 'eCoreActivity', label: 'E-Core Activity (%)', format: (v: string) => v },
+      { key: 'pCoreAvgFreq', label: 'P-Core Avg Freq (MHz)', format: (v: string) => v },
+      { key: 'eCoreAvgFreq', label: 'E-Core Avg Freq (MHz)', format: (v: string) => v },
+      { key: 'threadingRatio', label: 'P/E Ratio', format: (v: string) => v },
+      { key: 'threadingModel', label: 'Threading Model', format: (v: string) => v },
+      { key: 'avgCC6', label: 'Avg CC6 (%)', format: (v: string) => v },
+      { key: 'avgCC7', label: 'Avg CC7 (%)', format: (v: string) => v },
+    ];
+
     return (
       <div className="p-6 space-y-6">
-        <div className="flex justify-between items-center">
-          <h1 className="text-5xl font-black text-gray-900">Game Comparison</h1>
+        <h1 className="text-5xl font-black text-gray-900">Comparison View</h1>
 
-          {/* Comparison Limit Controls */}
-          <div className="flex items-center gap-3">
-            <span className="text-sm font-bold text-gray-700">Comparison Tiles:</span>
-            <button
-              onClick={() => {
-                const newLimit = Math.max(2, maxComparisons - 1);
-                setUserComparisonLimit(newLimit);
-              }}
-              disabled={maxComparisons <= 2}
-              className="px-3 py-1 border-[3px] border-gray-900 rounded-[4px] font-black text-white text-lg hover:-translate-y-[1px] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-              style={{ backgroundColor: colors.buttonDanger }}
-              title="Show fewer comparison tiles"
-            >
-              −
-            </button>
-            <span className="text-lg font-black text-gray-900 min-w-[80px] text-center">
-              {maxComparisons} / {screenMaxComparisons}
-            </span>
-            <button
-              onClick={() => {
-                const newLimit = Math.min(screenMaxComparisons, maxComparisons + 1);
-                setUserComparisonLimit(newLimit);
-              }}
-              disabled={maxComparisons >= screenMaxComparisons}
-              className="px-3 py-1 border-[3px] border-gray-900 rounded-[4px] font-black text-white text-lg hover:-translate-y-[1px] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-              style={{ backgroundColor: colors.buttonSuccess }}
-              title="Show more comparison tiles"
-            >
-              +
-            </button>
-            <button
-              onClick={() => setUserComparisonLimit(null)}
-              className="px-3 py-1 border-[3px] border-gray-900 rounded-[4px] font-bold text-white text-sm hover:-translate-y-[1px] transition-all"
-              style={{ backgroundColor: colors.buttonPrimary }}
-              title="Reset to default (6)"
-            >
-              Reset
-            </button>
-          </div>
-        </div>
-
-        {/* Side-by-side comparison table */}
-        <Cards className="p-6">
-          <div className="overflow-x-auto">
-            <table className="w-full border-[3px] border-gray-900">
-              <thead>
-                <tr style={{ backgroundColor: colors.tableHeaderBg }}>
-                  <th className="border-[3px] border-gray-900 px-3 py-3 text-left font-black sticky left-0 w-40" style={{ backgroundColor: colors.tableHeaderBg, color: colors.tableHeaderText }}>Metric</th>
-                  {selectedGamesForComparison.map((item, idx) => (
-                    <th key={idx} className="border-[3px] border-gray-900 px-4 py-3 text-center font-black min-w-[200px]" style={{ color: colors.tableHeaderText }}>
-                      <div className="flex flex-col items-center justify-center gap-1">
-                        <div className="text-base leading-tight max-w-full break-words">{item.game.name}</div>
-                        <div className="text-sm font-bold opacity-75">{item.skuName}</div>
-                      </div>
-                    </th>
-                  ))}
+        <Cards className="p-6 overflow-x-auto">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr style={{ backgroundColor: colors.tableHeaderBg }}>
+                <th className="border-[3px] border-gray-900 px-4 py-3 text-left font-black" style={{ color: colors.tableHeaderText, minWidth: '160px' }}>Metric</th>
+                {selectedGamesForComparison.map((item, idx) => (
+                  <th key={idx} className="border-[3px] border-gray-900 px-4 py-3 text-center font-black" style={{ color: colors.tableHeaderText, minWidth: '200px' }}>
+                    <div className="truncate">{item.game.name}</div>
+                    <div className="text-xs font-bold opacity-70">{item.skuName}</div>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {metrics.map((metric, rowIdx) => (
+                <tr key={rowIdx} className="hover:bg-gray-50 transition-colors">
+                  <td className="border-[3px] border-gray-900 px-4 py-3 font-black text-gray-900" style={{ backgroundColor: colors.background }}>
+                    {metric.label}
+                  </td>
+                  {selectedGamesForComparison.map((item, colIdx) => {
+                    const value = (item.game.insights as Record<string, string>)[metric.key];
+                    return (
+                      <td
+                        key={colIdx}
+                        className="border-[3px] border-gray-900 px-4 py-3 text-center font-bold"
+                        style={{
+                          backgroundColor: metric.key === 'threadingRatio'
+                            ? getHeatmapColorForRatio(parseFloat(value))
+                            : colors.cardBg
+                        }}
+                      >
+                        {metric.format(value)}
+                      </td>
+                    );
+                  })}
                 </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td className="border-[3px] border-gray-900 px-3 py-3 font-black text-gray-900 sticky left-0 bg-white text-sm">P-Core C0 %</td>
-                  {selectedGamesForComparison.map((item, idx) => (
-                    <td
-                      key={idx}
-                      className="border-[3px] border-gray-900 px-4 py-3 text-center font-black text-base"
-                      style={{
-                        backgroundColor: getHeatmapColorForRatio(parseFloat(item.game.insights.threadingRatio)),
-                        color: '#111827'
-                      }}
-                    >
-                      {item.game.insights.pCoreActivity}
-                    </td>
-                  ))}
-                </tr>
-                <tr>
-                  <td className="border-[3px] border-gray-900 px-3 py-3 font-black text-gray-900 sticky left-0 bg-white text-sm">E-Core C0 %</td>
-                  {selectedGamesForComparison.map((item, idx) => (
-                    <td
-                      key={idx}
-                      className="border-[3px] border-gray-900 px-4 py-3 text-center font-black text-base"
-                      style={{
-                        backgroundColor: getHeatmapColorForRatio(parseFloat(item.game.insights.threadingRatio)),
-                        color: '#111827'
-                      }}
-                    >
-                      {item.game.insights.eCoreActivity}
-                    </td>
-                  ))}
-                </tr>
-                <tr>
-                  <td className="border-[3px] border-gray-900 px-3 py-3 font-black text-gray-900 sticky left-0 bg-white text-sm">P/E Ratio</td>
-                  {selectedGamesForComparison.map((item, idx) => (
-                    <td
-                      key={idx}
-                      className="border-[3px] border-gray-900 px-4 py-3 text-center font-black text-base"
-                      style={{
-                        backgroundColor: getHeatmapColorForRatio(parseFloat(item.game.insights.threadingRatio)),
-                        color: '#111827'
-                      }}
-                    >
-                      {item.game.insights.threadingRatio}
-                    </td>
-                  ))}
-                </tr>
-                <tr>
-                  <td className="border-[3px] border-gray-900 px-3 py-3 font-black text-gray-900 sticky left-0 bg-white text-sm">Threading Model</td>
-                  {selectedGamesForComparison.map((item, idx) => (
-                    <td key={idx} className="border-[3px] border-gray-900 px-4 py-3 text-center font-bold text-gray-900 text-sm">
-                      {item.game.insights.threadingModel}
-                    </td>
-                  ))}
-                </tr>
-                <tr>
-                  <td className="border-[3px] border-gray-900 px-3 py-3 font-black text-gray-900 sticky left-0 bg-white text-sm">P-Core Avg Freq (MHz)</td>
-                  {selectedGamesForComparison.map((item, idx) => (
-                    <td key={idx} className="border-[3px] border-gray-900 px-4 py-3 text-center font-bold text-gray-900 text-sm">
-                      {item.game.insights.pCoreAvgFreq}
-                    </td>
-                  ))}
-                </tr>
-                <tr>
-                  <td className="border-[3px] border-gray-900 px-3 py-3 font-black text-gray-900 sticky left-0 bg-white text-sm">E-Core Avg Freq (MHz)</td>
-                  {selectedGamesForComparison.map((item, idx) => (
-                    <td key={idx} className="border-[3px] border-gray-900 px-4 py-3 text-center font-bold text-gray-900 text-sm">
-                      {item.game.insights.eCoreAvgFreq}
-                    </td>
-                  ))}
-                </tr>
-                <tr>
-                  <td className="border-[3px] border-gray-900 px-3 py-3 font-black text-gray-900 sticky left-0 bg-white text-sm">Total Cores</td>
-                  {selectedGamesForComparison.map((item, idx) => (
-                    <td key={idx} className="border-[3px] border-gray-900 px-4 py-3 text-center font-bold text-gray-900 text-sm">
-                      {item.game.metadata.totalCores}
-                    </td>
-                  ))}
-                </tr>
-                <tr>
-                  <td className="border-[3px] border-gray-900 px-3 py-3 font-black text-gray-900 sticky left-0 bg-white text-sm">Duration (s)</td>
-                  {selectedGamesForComparison.map((item, idx) => (
-                    <td key={idx} className="border-[3px] border-gray-900 px-4 py-3 text-center font-bold text-gray-900 text-sm">
-                      {item.game.metadata.duration}
-                    </td>
-                  ))}
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          <div className="mt-4 flex items-center gap-4 text-sm font-bold text-gray-900">
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 bg-[#10b981] border-[2px] border-gray-900"></div>
-              <span>&lt; 0.95 (Good E-Core Usage)</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 bg-[#fbbf24] border-[2px] border-gray-900"></div>
-              <span>0.95-1.05 (Balanced)</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 bg-[#ef4444] border-[2px] border-gray-900"></div>
-              <span>&gt; 1.05 (P-Core Dominant)</span>
-            </div>
-          </div>
+              ))}
+            </tbody>
+          </table>
         </Cards>
 
-        {/* Focused Analysis for Each Game */}
-        {selectedGamesForComparison.map((item, gameIdx) => {
-          const game = item.game;
-          const pCores = game.cStateData.filter(c => c.type === 'P-Core');
-          const eCores = game.cStateData.filter(c => c.type === 'E-Core');
-          const isExpanded = expandedComparisonRows[gameIdx];
-          const showCharts = showChartsFor[gameIdx];
-
-          return (
-            <Cards key={gameIdx} className="p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h2 className="text-3xl font-black text-gray-900">{game.name}</h2>
-                  <p className="text-sm font-bold text-gray-700 mt-1">
-                    SKU: {item.skuName} | Cores: {game.metadata.totalCores} | Duration: {game.metadata.duration}s
-                  </p>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => toggleComparisonRowExpansion(gameIdx)}
-                    className="px-4 py-2 border-[3px] border-gray-900 rounded-[4px] font-bold text-white hover:-translate-y-[1px] transition-all"
-                    style={{ backgroundColor: colors.buttonPrimary }}
-                  >
-                    {isExpanded ? 'Hide Core Stats' : 'Show Core Stats'}
-                  </button>
-                  <button
-                    onClick={() => toggleChartsVisibility(gameIdx)}
-                    className="px-4 py-2 border-[3px] border-gray-900 rounded-[4px] font-bold text-white hover:-translate-y-[1px] transition-all"
-                    style={{ backgroundColor: colors.buttonSecondary }}
-                  >
-                    {showCharts ? 'Hide Charts' : 'Show Charts'}
-                  </button>
-                </div>
-              </div>
-
-              {/* Individual Core Stats (Expandable) */}
-              {isExpanded && (
-                <div className="mb-6 p-4 border-[3px] border-gray-900 rounded-[4px]" style={{ backgroundColor: colors.background }}>
-                  <div className="grid grid-cols-2 gap-6">
-                    {/* P-Cores */}
-                    <div>
-                      <h4 className="text-base font-black mb-2 text-gray-900">P-Core Individual Stats</h4>
-                      <div className="flex flex-wrap gap-2">
-                        {pCores.map(core => (
-                          <div key={core.core} className="inline-flex items-center gap-2 border-[2px] border-gray-900 rounded-[4px] px-2 py-1" style={{ backgroundColor: colors.cardBg }}>
-                            <span className="font-bold text-gray-900 text-xs">P{core.core}</span>
-                            <div className="flex flex-col items-end">
-                              <span className="font-black text-xs" style={{ color: colors.buttonPrimary }}>C0: {core.active.toFixed(1)}%</span>
-                              <span className="font-bold text-[10px]" style={{ color: colors.accentColor }}>P0: {(core.freq || 0).toFixed(0)} MHz</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    {/* E-Cores */}
-                    <div>
-                      <h4 className="text-base font-black mb-2 text-gray-900">E-Core Individual Stats</h4>
-                      <div className="flex flex-wrap gap-2">
-                        {eCores.map(core => (
-                          <div key={core.core} className="inline-flex items-center gap-2 border-[2px] border-gray-900 rounded-[4px] px-2 py-1" style={{ backgroundColor: colors.cardBg }}>
-                            <span className="font-bold text-gray-900 text-xs">E{core.core}</span>
-                            <div className="flex flex-col items-end">
-                              <span className="font-black text-xs" style={{ color: colors.buttonSecondary }}>C0: {core.active.toFixed(1)}%</span>
-                              <span className="font-bold text-[10px]" style={{ color: colors.accentColor }}>P0: {(core.freq || 0).toFixed(0)} MHz</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Heatmap, Activity Chart, and Frequency Chart */}
-              {showCharts && (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  {/* Heatmap - Compact Version */}
-                  <div className="bg-heatmap-card p-4 border-[3px] border-gray-900 rounded-[4px]">
-                    <h3 className="text-lg font-black mb-3 text-gray-900">CPU Heatmap</h3>
-                    <div className="bg-heatmap-bg p-3 rounded-[4px] border-[2px] border-gray-900">
-                      <div className="flex gap-2 items-stretch justify-center">
-                        {/* Left Side - Compact */}
-                        <div className="flex flex-col gap-1.5 w-[70px]">
-                          {/* P0 */}
-                          {pCores[0] && (
-                            <div
-                              className="border-[2px] border-white rounded-[3px] flex flex-col items-center justify-center"
-                              style={{ backgroundColor: getActivityColor(pCores[0].active), minHeight: '36px' }}
-                            >
-                              <div className="text-[10px] font-black text-white">P{pCores[0].core}</div>
-                              <div className="text-xs font-black text-white">{pCores[0].active.toFixed(0)}%</div>
-                            </div>
-                          )}
-                          {/* E0-E3 */}
-                          <div className="grid grid-cols-2 gap-1 border-[2px] border-white rounded-[3px] p-1.5 bg-[#1e40af]/20">
-                            {eCores.slice(0, 4).map((core) => (
-                              <div
-                                key={core.core}
-                                className="border-[1px] border-white rounded-[2px] flex items-center justify-center"
-                                style={{ backgroundColor: getActivityColor(core.active), minHeight: '22px' }}
-                              >
-                                <div className="text-[9px] font-black text-white">{core.active.toFixed(0)}%</div>
-                              </div>
-                            ))}
-                          </div>
-                          {/* P1 */}
-                          {pCores[1] && (
-                            <div
-                              className="border-[2px] border-white rounded-[3px] flex flex-col items-center justify-center"
-                              style={{ backgroundColor: getActivityColor(pCores[1].active), minHeight: '34px' }}
-                            >
-                              <div className="text-[10px] font-black text-white">P{pCores[1].core}</div>
-                              <div className="text-xs font-black text-white">{pCores[1].active.toFixed(0)}%</div>
-                            </div>
-                          )}
-                          {/* P2 */}
-                          {pCores[2] && (
-                            <div
-                              className="border-[2px] border-white rounded-[3px] flex flex-col items-center justify-center"
-                              style={{ backgroundColor: getActivityColor(pCores[2].active), minHeight: '34px' }}
-                            >
-                              <div className="text-[10px] font-black text-white">P{pCores[2].core}</div>
-                              <div className="text-xs font-black text-white">{pCores[2].active.toFixed(0)}%</div>
-                            </div>
-                          )}
-                          {/* E8-E11 */}
-                          <div className="grid grid-cols-2 gap-1 border-[2px] border-white rounded-[3px] p-1.5 bg-[#1e40af]/20">
-                            {eCores.slice(8, 12).map((core) => (
-                              <div
-                                key={core.core}
-                                className="border-[1px] border-white rounded-[2px] flex items-center justify-center"
-                                style={{ backgroundColor: getActivityColor(core.active), minHeight: '22px' }}
-                              >
-                                <div className="text-[9px] font-black text-white">{core.active.toFixed(0)}%</div>
-                              </div>
-                            ))}
-                          </div>
-                          {/* P3 */}
-                          {pCores[3] && (
-                            <div
-                              className="border-[2px] border-white rounded-[3px] flex flex-col items-center justify-center"
-                              style={{ backgroundColor: getActivityColor(pCores[3].active), minHeight: '36px' }}
-                            >
-                              <div className="text-[10px] font-black text-white">P{pCores[3].core}</div>
-                              <div className="text-xs font-black text-white">{pCores[3].active.toFixed(0)}%</div>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Center Ring */}
-                        <div className="w-5 flex items-center justify-center">
-                          <div className="w-full h-full bg-gradient-to-b from-[#60a5fa] via-[#3b82f6] to-[#60a5fa] border-[1px] border-white/30 rounded-[2px]"></div>
-                        </div>
-
-                        {/* Right Side - Mirror */}
-                        <div className="flex flex-col gap-1.5 w-[70px]">
-                          {/* P4 */}
-                          {pCores[4] && (
-                            <div
-                              className="border-[2px] border-white rounded-[3px] flex flex-col items-center justify-center"
-                              style={{ backgroundColor: getActivityColor(pCores[4].active), minHeight: '36px' }}
-                            >
-                              <div className="text-[10px] font-black text-white">P{pCores[4].core}</div>
-                              <div className="text-xs font-black text-white">{pCores[4].active.toFixed(0)}%</div>
-                            </div>
-                          )}
-                          {/* E4-E7 */}
-                          <div className="grid grid-cols-2 gap-1 border-[2px] border-white rounded-[3px] p-1.5 bg-[#1e40af]/20">
-                            {eCores.slice(4, 8).map((core) => (
-                              <div
-                                key={core.core}
-                                className="border-[1px] border-white rounded-[2px] flex items-center justify-center"
-                                style={{ backgroundColor: getActivityColor(core.active), minHeight: '22px' }}
-                              >
-                                <div className="text-[9px] font-black text-white">{core.active.toFixed(0)}%</div>
-                              </div>
-                            ))}
-                          </div>
-                          {/* P5 */}
-                          {pCores[5] && (
-                            <div
-                              className="border-[2px] border-white rounded-[3px] flex flex-col items-center justify-center"
-                              style={{ backgroundColor: getActivityColor(pCores[5].active), minHeight: '34px' }}
-                            >
-                              <div className="text-[10px] font-black text-white">P{pCores[5].core}</div>
-                              <div className="text-xs font-black text-white">{pCores[5].active.toFixed(0)}%</div>
-                            </div>
-                          )}
-                          {/* P6 */}
-                          {pCores[6] && (
-                            <div
-                              className="border-[2px] border-white rounded-[3px] flex flex-col items-center justify-center"
-                              style={{ backgroundColor: getActivityColor(pCores[6].active), minHeight: '34px' }}
-                            >
-                              <div className="text-[10px] font-black text-white">P{pCores[6].core}</div>
-                              <div className="text-xs font-black text-white">{pCores[6].active.toFixed(0)}%</div>
-                            </div>
-                          )}
-                          {/* E12-E15 */}
-                          <div className="grid grid-cols-2 gap-1 border-[2px] border-white rounded-[3px] p-1.5 bg-[#1e40af]/20">
-                            {eCores.slice(12, 16).map((core) => (
-                              <div
-                                key={core.core}
-                                className="border-[1px] border-white rounded-[2px] flex items-center justify-center"
-                                style={{ backgroundColor: getActivityColor(core.active), minHeight: '22px' }}
-                              >
-                                <div className="text-[9px] font-black text-white">{core.active.toFixed(0)}%</div>
-                              </div>
-                            ))}
-                          </div>
-                          {/* P7 */}
-                          {pCores[7] && (
-                            <div
-                              className="border-[2px] border-white rounded-[3px] flex flex-col items-center justify-center"
-                              style={{ backgroundColor: getActivityColor(pCores[7].active), minHeight: '36px' }}
-                            >
-                              <div className="text-[10px] font-black text-white">P{pCores[7].core}</div>
-                              <div className="text-xs font-black text-white">{pCores[7].active.toFixed(0)}%</div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Activity Chart */}
-                  <div className="p-4 border-[3px] border-gray-900 rounded-[4px]" style={{ backgroundColor: colors.cardBg }}>
-                    <h3 className="text-lg font-black mb-3 text-gray-900">Activity Distribution</h3>
-                    <ActivityChart data={game.cStateData} />
-                  </div>
-
-                  {/* Frequency Chart */}
-                  <div className="p-4 border-[3px] border-gray-900 rounded-[4px]" style={{ backgroundColor: colors.cardBg }}>
-                    <h3 className="text-lg font-black mb-3 text-gray-900">Frequency Distribution</h3>
-                    <FrequencyChart data={game.cStateData} />
-                  </div>
-                </div>
-              )}
-            </Cards>
-          );
-        })}
+        {/* Threading Ratio Legend */}
+        <div className="flex items-center gap-4 text-sm font-bold text-gray-900">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 bg-[#10b981] border-[2px] border-gray-900"></div>
+            <span>&lt; 0.95 (Good E-Core Usage)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 bg-[#fbbf24] border-[2px] border-gray-900"></div>
+            <span>0.95-1.05 (Balanced)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 bg-[#ef4444] border-[2px] border-gray-900"></div>
+            <span>&gt; 1.05 (P-Core Dominant)</span>
+          </div>
+        </div>
       </div>
     );
   };
 
-  // Overall Threading Behavior View (with heatmap table)
+  // Overall Threading Behavior View
   const OverallView = () => {
-    const [expandedRows, setExpandedRows] = useState({});
+    const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
 
-    const toggleRowExpansion = (skuName, gameIndex) => {
+    const toggleRowExpansion = (skuName: string, gameIndex: number) => {
       const key = `${skuName}-${gameIndex}`;
       setExpandedRows(prev => ({
         ...prev,
@@ -1390,7 +803,6 @@ const SoCWatchAnalyzer = () => {
                 {sku.name}
               </h2>
 
-              {/* Heatmap Table */}
               <div className="overflow-x-auto">
                 <table className="w-full border-[3px] border-gray-900">
                   <thead>
@@ -1409,7 +821,7 @@ const SoCWatchAnalyzer = () => {
                     {sku.games.map((game, idx) => {
                       const isExpanded = expandedRows[`${sku.name}-${idx}`];
                       const pCores = game.cStateData.filter(c => c.type === 'P-Core');
-                      const eCores = game.cStateData.filter(c => c.type === 'E-Core');
+                      const eCores = game.cStateData.filter(c => c.type === 'E-Core' || c.type === 'LPE-Core');
 
                       return (
                         <React.Fragment key={idx}>
@@ -1421,7 +833,12 @@ const SoCWatchAnalyzer = () => {
                                 setActiveView('focused');
                               }}
                             >
-                              {game.name}
+                              <div className="flex items-center gap-2">
+                                {game.name}
+                                {game.formatVersion === 'comprehensive' && (
+                                  <span className="text-[9px] px-1 py-0.5 bg-green-500 text-white rounded-[2px] font-black">FULL</span>
+                                )}
+                              </div>
                             </td>
                             <td
                               className="border-[3px] border-gray-900 px-4 py-3 text-center font-black"
@@ -1474,9 +891,8 @@ const SoCWatchAnalyzer = () => {
                           </tr>
                           {isExpanded && (
                             <tr>
-                              <td colSpan="8" className="border-[3px] border-gray-900 px-6 py-4" style={{ backgroundColor: colors.background }}>
+                              <td colSpan={8} className="border-[3px] border-gray-900 px-6 py-4" style={{ backgroundColor: colors.background }}>
                                 <div className="grid grid-cols-2 gap-6">
-                                  {/* P-Cores */}
                                   <div>
                                     <h4 className="text-base font-black mb-2 text-gray-900">P-Core Individual Stats</h4>
                                     <div className="flex flex-wrap gap-2">
@@ -1491,13 +907,12 @@ const SoCWatchAnalyzer = () => {
                                       ))}
                                     </div>
                                   </div>
-                                  {/* E-Cores */}
                                   <div>
                                     <h4 className="text-base font-black mb-2 text-gray-900">E-Core Individual Stats</h4>
                                     <div className="flex flex-wrap gap-2">
                                       {eCores.map(core => (
                                         <div key={core.core} className="inline-flex items-center gap-2 border-[2px] border-gray-900 rounded-[4px] px-2 py-1" style={{ backgroundColor: colors.cardBg }}>
-                                          <span className="font-bold text-gray-900 text-xs">E{core.core}</span>
+                                          <span className="font-bold text-gray-900 text-xs">{core.type === 'LPE-Core' ? 'LPE' : 'E'}{core.core}</span>
                                           <div className="flex flex-col items-end">
                                             <span className="font-black text-xs" style={{ color: colors.buttonSecondary }}>C0: {core.active.toFixed(1)}%</span>
                                             <span className="font-bold text-[10px]" style={{ color: colors.accentColor }}>P0: {(core.freq || 0).toFixed(0)} MHz</span>
@@ -1507,6 +922,30 @@ const SoCWatchAnalyzer = () => {
                                     </div>
                                   </div>
                                 </div>
+                                {/* Extended data for comprehensive format */}
+                                {game.formatVersion === 'comprehensive' && game.packageCStates && (
+                                  <div className="mt-4 pt-4 border-t-[2px] border-gray-300">
+                                    <h4 className="text-base font-black mb-2 text-gray-900">Package C-States</h4>
+                                    <div className="grid grid-cols-4 gap-2">
+                                      <div className="border-[2px] border-gray-900 rounded-[4px] px-3 py-2 text-center" style={{ backgroundColor: '#ef4444' }}>
+                                        <div className="text-xs font-bold text-white">PC0</div>
+                                        <div className="text-lg font-black text-white">{game.packageCStates.pc0.toFixed(1)}%</div>
+                                      </div>
+                                      <div className="border-[2px] border-gray-900 rounded-[4px] px-3 py-2 text-center" style={{ backgroundColor: '#f97316' }}>
+                                        <div className="text-xs font-bold text-white">PC2</div>
+                                        <div className="text-lg font-black text-white">{game.packageCStates.pc2.toFixed(1)}%</div>
+                                      </div>
+                                      <div className="border-[2px] border-gray-900 rounded-[4px] px-3 py-2 text-center" style={{ backgroundColor: '#22c55e' }}>
+                                        <div className="text-xs font-bold text-white">PC6</div>
+                                        <div className="text-lg font-black text-white">{game.packageCStates.pc6.toFixed(1)}%</div>
+                                      </div>
+                                      <div className="border-[2px] border-gray-900 rounded-[4px] px-3 py-2 text-center" style={{ backgroundColor: '#10b981' }}>
+                                        <div className="text-xs font-bold text-white">PC10</div>
+                                        <div className="text-lg font-black text-white">{game.packageCStates.pc10.toFixed(1)}%</div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
                               </td>
                             </tr>
                           )}
@@ -1552,24 +991,23 @@ const SoCWatchAnalyzer = () => {
       );
     }
 
-    const pCores = useMemo(() => selectedGame.cStateData.filter(c => c.type === 'P-Core'), [selectedGame]);
-    const eCores = useMemo(() => selectedGame.cStateData.filter(c => c.type === 'E-Core'), [selectedGame]);
-
-    // Color gradient: Light blue (96a5fd) at 0% to Dark blue (1e3a8a) at 100%
-    const getActivityColor = (percentage) => {
-      const r = Math.round(147 - percentage * 0.81); // 147 to 30
-      const g = Math.round(197 - percentage * 1.16); // 197 to 81
-      const b = Math.round(253 - percentage * 0.51); // 253 to 202
-      return `rgb(${r}, ${g}, ${b})`;
-    };
+    const pCores = selectedGame.cStateData.filter(c => c.type === 'P-Core');
+    const eCores = selectedGame.cStateData.filter(c => c.type === 'E-Core' || c.type === 'LPE-Core');
+    const isComprehensive = selectedGame.formatVersion === 'comprehensive';
 
     return (
       <div className="p-4 space-y-4">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-5xl font-black text-gray-900">{selectedGame.name}</h1>
+            <h1 className="text-5xl font-black text-gray-900 flex items-center gap-3">
+              {selectedGame.name}
+              {isComprehensive && (
+                <span className="text-sm px-2 py-1 bg-green-500 text-white rounded-[4px] font-black">COMPREHENSIVE FORMAT</span>
+              )}
+            </h1>
             <p className="text-lg font-bold text-gray-700 mt-2">
               SKU: {selectedGame.skuName} | Cores: {selectedGame.metadata.totalCores} | Duration: {selectedGame.metadata.duration}s
+              {selectedGame.metadata.cpuModel && ` | CPU: ${selectedGame.metadata.cpuModel}`}
             </p>
           </div>
         </div>
@@ -1599,14 +1037,13 @@ const SoCWatchAnalyzer = () => {
 
         {/* CPU Architecture Heatmap + Charts Side by Side */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6" style={{ alignItems: 'stretch' }}>
-          {/* LEFT: CPU Architecture Heatmap - Arrow Lake Ultra 9 285K Layout */}
+          {/* LEFT: CPU Architecture Heatmap */}
           <Cards className="p-6 bg-heatmap-card flex flex-col" style={{ height: '580px' }}>
             <h3 className="text-xl font-black mb-4 text-gray-900">CPU Architecture Heatmap</h3>
             <div className="bg-heatmap-bg p-5 rounded-[4px] border-[3px] border-gray-900 flex-1 flex flex-col justify-between text-poppins" style={{ fontFamily: 'Poppins, sans-serif' }}>
               <div className="flex gap-3 mx-auto w-full" style={{ maxWidth: '480px' }}>
                 {/* LEFT SIDE */}
                 <div className="flex-1 flex flex-col gap-1.5">
-                  {/* P0 - Top Large P-Core */}
                   {pCores[0] && (
                     <div
                       className="border-[3px] border-white rounded-[4px] flex flex-col items-center justify-center"
@@ -1620,7 +1057,6 @@ const SoCWatchAnalyzer = () => {
                     </div>
                   )}
 
-                  {/* E0-E3 - Top E-Core Cluster */}
                   <div className="grid grid-cols-2 gap-1.5 border-[3px] border-white rounded-[4px] p-2 bg-[#1e40af]/20">
                     {eCores.slice(0, 4).map((core) => (
                       <div
@@ -1631,13 +1067,12 @@ const SoCWatchAnalyzer = () => {
                           height: '42px'
                         }}
                       >
-                        <div className="text-xs font-bold text-white" style={{ fontFamily: 'Poppins, sans-serif' }}>E{core.core}</div>
+                        <div className="text-xs font-bold text-white" style={{ fontFamily: 'Poppins, sans-serif' }}>{core.type === 'LPE-Core' ? 'LPE' : 'E'}{core.core}</div>
                         <div className="text-sm font-black text-white" style={{ fontFamily: 'Poppins, sans-serif' }}>{core.active.toFixed(0)}%</div>
                       </div>
                     ))}
                   </div>
 
-                  {/* P1 - Middle Top P-Core */}
                   {pCores[1] && (
                     <div
                       className="border-[3px] border-white rounded-[4px] flex flex-col items-center justify-center"
@@ -1651,7 +1086,6 @@ const SoCWatchAnalyzer = () => {
                     </div>
                   )}
 
-                  {/* P2 - Middle Bottom P-Core */}
                   {pCores[2] && (
                     <div
                       className="border-[3px] border-white rounded-[4px] flex flex-col items-center justify-center"
@@ -1665,24 +1099,6 @@ const SoCWatchAnalyzer = () => {
                     </div>
                   )}
 
-                  {/* E8-E11 - Bottom E-Core Cluster */}
-                  <div className="grid grid-cols-2 gap-1.5 border-[3px] border-white rounded-[4px] p-2 bg-[#1e40af]/20">
-                    {eCores.slice(8, 12).map((core) => (
-                      <div
-                        key={core.core}
-                        className="border-[2px] border-white rounded-[3px] flex flex-col items-center justify-center"
-                        style={{
-                          backgroundColor: getActivityColor(core.active),
-                          height: '42px'
-                        }}
-                      >
-                        <div className="text-xs font-bold text-white" style={{ fontFamily: 'Poppins, sans-serif' }}>E{core.core}</div>
-                        <div className="text-sm font-black text-white" style={{ fontFamily: 'Poppins, sans-serif' }}>{core.active.toFixed(0)}%</div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* P3 - Bottom Large P-Core */}
                   {pCores[3] && (
                     <div
                       className="border-[3px] border-white rounded-[4px] flex flex-col items-center justify-center"
@@ -1697,30 +1113,15 @@ const SoCWatchAnalyzer = () => {
                   )}
                 </div>
 
-                {/* CENTER - Die-to-Die Interconnect */}
+                {/* CENTER - Ring Interconnect */}
                 <div className="w-8 flex flex-col items-center justify-center">
                   <div className="w-full h-full bg-gradient-to-b from-[#60a5fa] via-[#3b82f6] to-[#60a5fa] border-[2px] border-white/30 rounded-[2px] flex items-center justify-center">
                     <div className="text-[8px] font-black text-white transform -rotate-90 whitespace-nowrap">RING</div>
                   </div>
                 </div>
 
-                {/* RIGHT SIDE (MIRROR) */}
+                {/* RIGHT SIDE */}
                 <div className="flex-1 flex flex-col gap-1.5">
-                  {/* P4 - Top Large P-Core */}
-                  {pCores[4] && (
-                    <div
-                      className="border-[3px] border-white rounded-[4px] flex flex-col items-center justify-center"
-                      style={{
-                        backgroundColor: getActivityColor(pCores[4].active),
-                        height: '72px'
-                      }}
-                    >
-                      <div className="text-base font-bold text-white" style={{ fontFamily: 'Poppins, sans-serif' }}>P{pCores[4].core}</div>
-                      <div className="text-xl font-black text-white" style={{ fontFamily: 'Poppins, sans-serif' }}>{pCores[4].active.toFixed(1)}%</div>
-                    </div>
-                  )}
-
-                  {/* E4-E7 - Top E-Core Cluster */}
                   <div className="grid grid-cols-2 gap-1.5 border-[3px] border-white rounded-[4px] p-2 bg-[#1e40af]/20">
                     {eCores.slice(4, 8).map((core) => (
                       <div
@@ -1731,70 +1132,11 @@ const SoCWatchAnalyzer = () => {
                           height: '42px'
                         }}
                       >
-                        <div className="text-xs font-bold text-white" style={{ fontFamily: 'Poppins, sans-serif' }}>E{core.core}</div>
+                        <div className="text-xs font-bold text-white" style={{ fontFamily: 'Poppins, sans-serif' }}>{core.type === 'LPE-Core' ? 'LPE' : 'E'}{core.core}</div>
                         <div className="text-sm font-black text-white" style={{ fontFamily: 'Poppins, sans-serif' }}>{core.active.toFixed(0)}%</div>
                       </div>
                     ))}
                   </div>
-
-                  {/* P5 - Middle Top P-Core */}
-                  {pCores[5] && (
-                    <div
-                      className="border-[3px] border-white rounded-[4px] flex flex-col items-center justify-center"
-                      style={{
-                        backgroundColor: getActivityColor(pCores[5].active),
-                        height: '68px'
-                      }}
-                    >
-                      <div className="text-base font-bold text-white" style={{ fontFamily: 'Poppins, sans-serif' }}>P{pCores[5].core}</div>
-                      <div className="text-xl font-black text-white" style={{ fontFamily: 'Poppins, sans-serif' }}>{pCores[5].active.toFixed(1)}%</div>
-                    </div>
-                  )}
-
-                  {/* P6 - Middle Bottom P-Core */}
-                  {pCores[6] && (
-                    <div
-                      className="border-[3px] border-white rounded-[4px] flex flex-col items-center justify-center"
-                      style={{
-                        backgroundColor: getActivityColor(pCores[6].active),
-                        height: '68px'
-                      }}
-                    >
-                      <div className="text-base font-bold text-white" style={{ fontFamily: 'Poppins, sans-serif' }}>P{pCores[6].core}</div>
-                      <div className="text-xl font-black text-white" style={{ fontFamily: 'Poppins, sans-serif' }}>{pCores[6].active.toFixed(1)}%</div>
-                    </div>
-                  )}
-
-                  {/* E12-E15 - Bottom E-Core Cluster */}
-                  <div className="grid grid-cols-2 gap-1.5 border-[3px] border-white rounded-[4px] p-2 bg-[#1e40af]/20">
-                    {eCores.slice(12, 16).map((core) => (
-                      <div
-                        key={core.core}
-                        className="border-[2px] border-white rounded-[3px] flex flex-col items-center justify-center"
-                        style={{
-                          backgroundColor: getActivityColor(core.active),
-                          height: '42px'
-                        }}
-                      >
-                        <div className="text-xs font-bold text-white" style={{ fontFamily: 'Poppins, sans-serif' }}>E{core.core}</div>
-                        <div className="text-sm font-black text-white" style={{ fontFamily: 'Poppins, sans-serif' }}>{core.active.toFixed(0)}%</div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* P7 - Bottom Large P-Core */}
-                  {pCores[7] && (
-                    <div
-                      className="border-[3px] border-white rounded-[4px] flex flex-col items-center justify-center"
-                      style={{
-                        backgroundColor: getActivityColor(pCores[7].active),
-                        height: '72px'
-                      }}
-                    >
-                      <div className="text-base font-bold text-white" style={{ fontFamily: 'Poppins, sans-serif' }}>P{pCores[7].core}</div>
-                      <div className="text-xl font-black text-white" style={{ fontFamily: 'Poppins, sans-serif' }}>{pCores[7].active.toFixed(1)}%</div>
-                    </div>
-                  )}
                 </div>
               </div>
 
@@ -1818,19 +1160,106 @@ const SoCWatchAnalyzer = () => {
 
           {/* RIGHT: Charts Section */}
           <div className="flex flex-col gap-6" style={{ height: '580px' }}>
-            {/* Core Activity Distribution */}
             <Cards className="p-6">
               <h3 className="text-lg font-bold mb-3 text-gray-900">Core Activity Distribution</h3>
-              <ActivityChart data={selectedGame.cStateData} />
+              <ActivityChart data={selectedGame.cStateData} height={220} />
             </Cards>
 
-            {/* Frequency by Core */}
             <Cards className="p-6">
               <h3 className="text-lg font-bold mb-3 text-gray-900">Frequency by Core</h3>
-              <FrequencyChart data={selectedGame.cStateData} />
+              <FrequencyChart data={selectedGame.cStateData} height={220} />
             </Cards>
           </div>
         </div>
+
+        {/* Extended Data Section for Comprehensive Format */}
+        {isComprehensive && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+            {/* Package C-States */}
+            {selectedGame.packageCStates && (
+              <Cards className="p-6">
+                <h3 className="text-xl font-black mb-4 text-gray-900 flex items-center gap-2">
+                  <Zap className="w-5 h-5" />
+                  Package C-States
+                </h3>
+                <PackageStateChart data={selectedGame.packageCStates} height={200} />
+              </Cards>
+            )}
+
+            {/* CPU-iGPU Concurrency */}
+            {selectedGame.concurrency && (
+              <Cards className="p-6">
+                <h3 className="text-xl font-black mb-4 text-gray-900 flex items-center gap-2">
+                  <Cpu className="w-5 h-5" />
+                  CPU-iGPU Concurrency
+                </h3>
+                <ConcurrencyChart data={selectedGame.concurrency} height={200} />
+              </Cards>
+            )}
+
+            {/* Power Data */}
+            {selectedGame.powerData && (
+              <Cards className="p-6">
+                <h3 className="text-xl font-black mb-4 text-gray-900 flex items-center gap-2">
+                  <Power className="w-5 h-5" />
+                  Power Consumption
+                </h3>
+                <div className="text-center mb-4">
+                  <div className="text-4xl font-black text-gray-900">{selectedGame.powerData.package.toFixed(2)} W</div>
+                  <div className="text-sm font-bold text-gray-600">Package Power</div>
+                </div>
+              </Cards>
+            )}
+
+            {/* Temperature Data */}
+            {selectedGame.thermalData && (
+              <Cards className="p-6">
+                <h3 className="text-xl font-black mb-4 text-gray-900 flex items-center gap-2">
+                  <Thermometer className="w-5 h-5" />
+                  Temperature
+                </h3>
+                <div className="text-center mb-4">
+                  <div className="text-4xl font-black text-gray-900">{selectedGame.thermalData.packageTemp.toFixed(1)}°C</div>
+                  <div className="text-sm font-bold text-gray-600">Avg Package Temp</div>
+                </div>
+                <TemperatureChart data={selectedGame.thermalData} height={150} />
+              </Cards>
+            )}
+
+            {/* S0ix State */}
+            {selectedGame.s0ixState && (
+              <Cards className="p-6">
+                <h3 className="text-xl font-black mb-4 text-gray-900">S0ix Sleep States</h3>
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center border-[2px] border-gray-900 rounded-[4px] p-3" style={{ backgroundColor: colors.cardBg }}>
+                    <span className="font-bold">SLP-S0</span>
+                    <span className="font-black text-lg">{selectedGame.s0ixState.slpS0Residency.toFixed(1)}%</span>
+                  </div>
+                  <div className="flex justify-between items-center border-[2px] border-gray-900 rounded-[4px] p-3" style={{ backgroundColor: colors.cardBg }}>
+                    <span className="font-bold">S0i2.0</span>
+                    <span className="font-black">{selectedGame.s0ixState.s0i2.s0i2_0.toFixed(1)}%</span>
+                  </div>
+                  <div className="flex justify-between items-center border-[2px] border-gray-900 rounded-[4px] p-3" style={{ backgroundColor: colors.cardBg }}>
+                    <span className="font-bold">S0i2.1</span>
+                    <span className="font-black">{selectedGame.s0ixState.s0i2.s0i2_1.toFixed(1)}%</span>
+                  </div>
+                  <div className="flex justify-between items-center border-[2px] border-gray-900 rounded-[4px] p-3" style={{ backgroundColor: colors.cardBg }}>
+                    <span className="font-bold">S0i2.2</span>
+                    <span className="font-black">{selectedGame.s0ixState.s0i2.s0i2_2.toFixed(1)}%</span>
+                  </div>
+                </div>
+              </Cards>
+            )}
+
+            {/* Wakeup Data */}
+            {selectedGame.wakeupData && selectedGame.wakeupData.packageWakeups.length > 0 && (
+              <Cards className="p-6">
+                <h3 className="text-xl font-black mb-4 text-gray-900">Package Wakeups</h3>
+                <WakeupChart data={selectedGame.wakeupData.packageWakeups} height={200} />
+              </Cards>
+            )}
+          </div>
+        )}
       </div>
     );
   };
@@ -1838,23 +1267,22 @@ const SoCWatchAnalyzer = () => {
   // Header/Navbar with upload buttons
   const Header = () => {
     const [folderName, setFolderName] = useState('');
-    const hasData = skus.length > 0;
 
-    const handleFileSelection = async (event) => {
-      const files = Array.from(event.target.files);
+    const handleFileSelection = async (event: ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(event.target.files || []);
       if (files.length === 0) return;
 
-      // Auto-detect directory name from first file path if available
       let detectedFolderName = folderName.trim();
-      if (!detectedFolderName && files.length > 0 && files[0].webkitRelativePath) {
-        // Extract parent directory name from path
-        const pathParts = files[0].webkitRelativePath.split('/');
-        if (pathParts.length > 1) {
-          detectedFolderName = pathParts[0];
+      if (!detectedFolderName && files.length > 0) {
+        const file = files[0] as File & { webkitRelativePath?: string };
+        if (file.webkitRelativePath) {
+          const pathParts = file.webkitRelativePath.split('/');
+          if (pathParts.length > 1) {
+            detectedFolderName = pathParts[0];
+          }
         }
       }
 
-      // If still no name, use "Untitled"
       if (!detectedFolderName) {
         detectedFolderName = 'Untitled';
       }
@@ -1871,7 +1299,6 @@ const SoCWatchAnalyzer = () => {
             <h1 className="text-2xl font-black" style={{ color: colors.headerText }}>Intel SoC Vision</h1>
           </div>
 
-          {/* Color Palette Switcher */}
           <div className="flex items-center gap-2 pl-6 border-l-[3px] border-gray-900">
             <span className="text-sm font-bold" style={{ color: colors.headerText }}>Color:</span>
             {Object.keys(colorPalettes).map((paletteKey) => {
@@ -1892,14 +1319,12 @@ const SoCWatchAnalyzer = () => {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* System message */}
           {comparisonMode && selectedGamesForComparison.length > 0 && (
             <div className="px-4 py-2 border-[3px] border-gray-900 rounded-[4px] font-bold text-white text-sm" style={{ backgroundColor: colors.buttonPrimary }}>
               {selectedGamesForComparison.length}/{maxComparisons} game{selectedGamesForComparison.length > 1 ? 's' : ''} selected
             </div>
           )}
 
-          {/* Upload buttons */}
           <label className="block">
             <div className="flex items-center gap-2 px-4 py-2 border-[3px] border-gray-900 rounded-[4px] font-bold text-white cursor-pointer hover:-translate-x-[1px] hover:-translate-y-[1px] transition-all" style={{ backgroundColor: colors.buttonPrimary }}>
               <Folder className="w-5 h-5" />
@@ -1910,8 +1335,7 @@ const SoCWatchAnalyzer = () => {
               className="hidden"
               accept=".csv"
               multiple
-              webkitdirectory=""
-              directory=""
+              {...{ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>}
               onChange={handleFileSelection}
               disabled={isProcessing}
             />
@@ -1962,7 +1386,7 @@ const SoCWatchAnalyzer = () => {
         title={popup.title}
         message={popup.message}
         type={popup.type}
-        onConfirm={popup.onConfirm}
+        onConfirm={popup.onConfirm || undefined}
         confirmText={popup.confirmText}
         cancelText={popup.cancelText}
       />

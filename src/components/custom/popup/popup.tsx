@@ -1,8 +1,30 @@
-import React from 'react';
+import { MouseEvent } from 'react';
 import { X, AlertCircle, CheckCircle, Info } from 'lucide-react';
 import { BtnBgShadow } from '../buttons/btn-bg-shadow';
 
-export const Popup = ({ isOpen, onClose, title, message, type = 'info', onConfirm, confirmText = 'OK', cancelText = 'Cancel' }) => {
+type PopupType = 'error' | 'warning' | 'success' | 'info';
+
+interface PopupProps {
+  isOpen: boolean;
+  onClose: () => void;
+  title: string;
+  message: string;
+  type?: PopupType;
+  onConfirm?: () => void;
+  confirmText?: string;
+  cancelText?: string;
+}
+
+export const Popup = ({
+  isOpen,
+  onClose,
+  title,
+  message,
+  type = 'info',
+  onConfirm,
+  confirmText = 'OK',
+  cancelText = 'Cancel',
+}: PopupProps) => {
   if (!isOpen) return null;
 
   const getIcon = () => {
@@ -17,7 +39,7 @@ export const Popup = ({ isOpen, onClose, title, message, type = 'info', onConfir
     }
   };
 
-  const handleBackdropClick = (e) => {
+  const handleBackdropClick = (e: MouseEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget) {
       onClose();
     }
@@ -31,7 +53,6 @@ export const Popup = ({ isOpen, onClose, title, message, type = 'info', onConfir
       <div className="relative w-full max-w-md mx-4">
         <BtnBgShadow borderRadius="4" translate="4" />
         <div className="relative z-10 bg-[#fffbeb] border-[4px] border-gray-900 rounded-[4px] p-6">
-          {/* Close button */}
           <button
             onClick={onClose}
             className="absolute top-4 right-4 p-1 hover:-translate-y-[1px] transition-all"
@@ -40,18 +61,15 @@ export const Popup = ({ isOpen, onClose, title, message, type = 'info', onConfir
             <X className="w-5 h-5 text-gray-900" />
           </button>
 
-          {/* Icon and Title */}
           <div className="flex flex-col items-center text-center mb-4">
             {getIcon()}
             <h3 className="text-2xl font-black text-gray-900 mt-3">{title}</h3>
           </div>
 
-          {/* Message */}
           <p className="text-center text-base font-bold text-gray-700 mb-6">
             {message}
           </p>
 
-          {/* Buttons */}
           <div className="flex gap-3 justify-center">
             {onConfirm ? (
               <>

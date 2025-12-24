@@ -1,4 +1,19 @@
+import { ChangeEvent } from 'react';
 import { BtnBgShadow } from '../buttons/btn-bg-shadow';
+
+type InputStyle = 'square' | 'square_rounded' | 'circle';
+
+interface InputProps {
+  value?: string;
+  onChange?: (e: ChangeEvent<HTMLInputElement>) => void;
+  type?: string;
+  placeholder?: string;
+  className?: string;
+  input_style?: InputStyle;
+  accept?: string;
+  multiple?: boolean;
+  disabled?: boolean;
+}
 
 export const Input = ({
   value,
@@ -10,15 +25,14 @@ export const Input = ({
   accept,
   multiple = false,
   disabled = false,
-}) => {
-  const borderRadiusStyles = {
+}: InputProps) => {
+  const borderRadiusStyles: Record<InputStyle, string> = {
     square: 'rounded-none',
     square_rounded: 'rounded-[4px]',
     circle: 'rounded-full',
   };
 
-  // Map input style to appropriate border radius for BgShadow
-  const BtnBgShadowRadius = {
+  const BtnBgShadowRadius: Record<InputStyle, '0' | '4' | '100'> = {
     square: '0',
     square_rounded: '4',
     circle: '100',

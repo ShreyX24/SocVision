@@ -1,10 +1,15 @@
+interface BtnBgShadowProps {
+  borderRadius?: '0' | '3' | '4' | '14' | '100';
+  translate?: '0' | '1' | '2' | '4' | '6';
+  className?: string;
+}
+
 export const BtnBgShadow = ({
   borderRadius = '3',
   translate = '2',
   className = '',
-}) => {
-  // Map different border radius values to specific Tailwind classes
-  const radiusClasses = {
+}: BtnBgShadowProps) => {
+  const radiusClasses: Record<string, string> = {
     '0': 'rounded-none',
     '3': 'rounded-[3px]',
     '4': 'rounded-[4px]',
@@ -12,7 +17,7 @@ export const BtnBgShadow = ({
     '100': 'rounded-full',
   };
 
-  const translateClass = {
+  const translateClass: Record<string, string> = {
     '0': 'translate-[0px]',
     '1': 'translate-[1px]',
     '2': 'translate-[2px]',
@@ -20,9 +25,7 @@ export const BtnBgShadow = ({
     '6': 'translate-[6px]',
   };
 
-  // Get the appropriate class or default to rounded-[3px]
-  const radiusClass =
-    radiusClasses[borderRadius] || 'rounded-[3px]';
+  const radiusClass = radiusClasses[borderRadius] || 'rounded-[3px]';
 
   return (
     <div
